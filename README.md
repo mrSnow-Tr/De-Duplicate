@@ -53,10 +53,9 @@ Works on:
 # Installation Guide 
 
 ## 1. Clone Repository
-
-'git clone https://github.com/torekultushar/De-Duplicate.git'
-
-'cd De-Duplicate'
+```bash
+git clone https://github.com/torekultushar/De-Duplicate.git
+cd De-Duplicate
 
 ## 2. Install Python
 
@@ -65,19 +64,24 @@ Download Python:
 https://www.python.org/downloads/
 
 Check version:
-'python --version'
+```bash
+python --version
 
 ## 3. Install Requirements
-'pip install -r requirements.txt'
+```bash
+pip install -r requirements.txt
 
 # Windows
-'python main.py'
+```bash
+python main.py
 
 # Linux / macOS
-'python3 main.py'
+```bash
+python3 main.py
 
 # Termux
-'python main.py'
+```bash
+python main.py
 
 # How Duplicate Detection Works 
 
