@@ -36,35 +36,74 @@ def get_downloads_path():
 
 DOWNLOADS_PATH = get_downloads_path()
 
+
 # =========================
-# FOLDERS
+# FILE CATEGORY CONFIG
 # =========================
 
-IMAGE_FOLDER = "Images"
-VIDEO_FOLDER = "Videos"
-DUPLICATE_FOLDER = "Duplicates"
+FILE_CATEGORIES = {
+    "Images": {
+        ".jpg", ".jpeg", ".png", ".gif",
+        ".bmp", ".webp", ".tiff", ".heic",
+        ".dng", ".raw", ".svg", ".ico"
+    },
 
-IMAGES_PATH = DOWNLOADS_PATH / IMAGE_FOLDER
-VIDEOS_PATH = DOWNLOADS_PATH / VIDEO_FOLDER
-DUPLICATES_PATH = DOWNLOADS_PATH / DUPLICATE_FOLDER
+    "Videos": {
+        ".mp4", ".mkv", ".avi", ".mov",
+        ".wmv", ".flv", ".webm", ".m4v",
+        ".3gp", ".mpeg", ".mpg"
+    },
 
-IMAGES_PATH.mkdir(parents=True, exist_ok=True)
-VIDEOS_PATH.mkdir(parents=True, exist_ok=True)
+    "Music": {
+        ".mp3", ".wav", ".flac", ".aac",
+        ".ogg", ".m4a", ".wma", ".opus"
+    },
+
+    "Documents": {
+        ".pdf", ".doc", ".docx", ".ppt",
+        ".pptx", ".xls", ".xlsx", ".txt",
+        ".rtf", ".csv", ".epub", ".md"
+    },
+
+    "Programs": {
+        ".exe", ".msi", ".apk", ".deb",
+        ".rpm", ".sh", ".bat", ".jar",
+        ".appimage", ".iso"
+    },
+
+    "Compressed": {
+        ".zip", ".rar", ".7z", ".tar",
+        ".gz", ".bz2", ".xz"
+    },
+
+    "Code": {
+        ".py", ".js", ".ts", ".java",
+        ".cpp", ".c", ".cs", ".html",
+        ".css", ".php", ".json", ".xml",
+        ".yaml", ".yml", ".sql"
+    }
+}
+
+
+# =========================
+# CATEGORY FOLDERS
+# =========================
+
+CATEGORY_PATHS = {}
+
+for category in FILE_CATEGORIES:
+    path = DOWNLOADS_PATH / category
+    path.mkdir(parents=True, exist_ok=True)
+    CATEGORY_PATHS[category] = path
+
+DUPLICATES_PATH = DOWNLOADS_PATH / "Duplicates"
 DUPLICATES_PATH.mkdir(parents=True, exist_ok=True)
 
 
-# =========================
-# SUPPORTED FILE TYPES
-# =========================
-
-IMAGE_EXTENSIONS = {
-    ".jpg", ".jpeg", ".png", ".gif",
-    ".bmp", ".webp", ".tiff", ".heic", ".dng"
-}
-
-VIDEO_EXTENSIONS = {
-    ".mp4", ".mkv", ".avi", ".mov",
-    ".wmv", ".flv", ".webm", ".m4v",".3gp"
+SUPPORTED_EXTENSIONS = {
+    ext
+    for extensions in FILE_CATEGORIES.values()
+    for ext in extensions
 }
 
 
@@ -73,6 +112,7 @@ VIDEO_EXTENSIONS = {
 # =========================
 
 exit_event = threading.Event()
+hash_lock = threading.Lock()
 
 
 def safe_exit_handler(signum=None, frame=None):
@@ -109,10 +149,13 @@ def generate_file_hash(file_path, chunk_size=1024 * 1024):
 def get_file_category(file_path):
     ext = file_path.suffix.lower()
 
-    if ext in IMAGE_EXTENSIONS:
-        return "image"
-    if ext in VIDEO_EXTENSIONS:
-        return "video"
+    if ext not in SUPPORTED_EXTENSIONS:
+        return None
+
+    for category, extensions in FILE_CATEGORIES.items():
+        if ext in extensions:
+            return category
+
     return None
 
 
@@ -151,6 +194,9 @@ def process_file(file_path, seen_hashes):
     if exit_event.is_set():
         return "exit"
 
+    if file_path.name.startswith("."):
+        return "skipped"
+
     category = get_file_category(file_path)
     if not category:
         return "skipped"
@@ -158,18 +204,17 @@ def process_file(file_path, seen_hashes):
     file_hash = generate_file_hash(file_path)
     if not file_hash:
         return "skipped"
+	
+    with hash_lock:
+    	if file_hash in seen_hashes:
+        	handle_duplicate(file_path)
+        	return "duplicate"
 
-    if file_hash in seen_hashes:
-        handle_duplicate(file_path)
-        return "duplicate"
-
-    seen_hashes.add(file_hash)
+    	seen_hashes.add(file_hash)
+    
 
     try:
-        if category == "image":
-            safe_move(file_path, IMAGES_PATH)
-        elif category == "video":
-            safe_move(file_path, VIDEOS_PATH)
+        safe_move(file_path, CATEGORY_PATHS[category])
 
         print(f"[MOVED] {file_path.name}")
         return "moved"
@@ -192,13 +237,13 @@ def process_files():
         print(f"[ERROR] Downloads folder not found: {DOWNLOADS_PATH}")
         return
 
+    excluded_paths = set(CATEGORY_PATHS.values())
+    excluded_paths.add(DUPLICATES_PATH)
     all_files = [
-        f for f in DOWNLOADS_PATH.rglob("*")
-        if f.is_file()
-        and IMAGES_PATH not in f.parents
-        and VIDEOS_PATH not in f.parents
-        and DUPLICATES_PATH not in f.parents
-    ]
+    	f for f in DOWNLOADS_PATH.rglob("*")
+    	if f.is_file()
+    	and not any(excluded in f.parents for excluded in excluded_paths)
+	]
 
     if not all_files:
         print("[INFO] No files found.")
@@ -213,7 +258,7 @@ def process_files():
         "error": 0
     }
 
-    max_workers = min(8, os.cpu_count() or 4)
+    max_workers = min(32, (os.cpu_count() or 4) * 2)
 
     print(f"[INFO] Processing {len(all_files)} files using {max_workers} threads...\n")
 
@@ -242,7 +287,7 @@ def process_files():
         safe_exit_handler()
 
     finally:
-        executor.shutdown(wait=False)
+        executor.shutdown(wait=True)
 
     # =========================
     # SUMMARY
