@@ -1,6 +1,6 @@
 # De-Duplicate
 
-A cross-platform Python script for removing duplicate images and videos using SHA256 hashing.
+A cross-platform Python script for filtering duplicate images and videos using SHA256 hashing.
 
 Works on:
 
@@ -15,12 +15,11 @@ Works on:
 
 - Detects duplicates using SHA256 hash
 - Works even if filenames are changed
-- Deletes duplicate files automatically
+- Filters duplicate files automatically
 - Sorts unique files into folders
 - Recursive folder scanning
 - Cross-platform support
 - Lightweight and fast
-- Easy to extend later
 
 ---
 
@@ -37,7 +36,8 @@ Works on:
 - webp
 - tiff
 - heic
-
+- dng
+  
 ## Videos
 
 - mp4
@@ -48,6 +48,7 @@ Works on:
 - flv
 - webm
 - m4v
+- 3gp
 
 
 # Installation Guide 
@@ -85,19 +86,17 @@ python3 main.py
 ```
 # Termux
 ```bash
+termux-setup-storage
 python main.py
 ```
+
 # How Duplicate Detection Works 
 
 The script does NOT compare filenames.
-
-Instead, it generates a SHA256 hash from the actual file content.
-It creates a unique digital fingerprint for every file.
+Instead, it generates a SHA256 hash from the actual file content. It creates a unique digital fingerprint for every file.
 
 # Usage
-
-Put all files inside the Raw folder.
-Run the script.
+Script will filter-out  duplicate files from Downloads folder and short them inside Downloads folder according to their type. 
 
 # Requirements
 ```bash
