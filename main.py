@@ -240,7 +240,7 @@ def process_files():
     excluded_paths = set(CATEGORY_PATHS.values())
     excluded_paths.add(DUPLICATES_PATH)
     all_files = [
-    	f for f in DOWNLOADS_PATH.rglob("*")
+    	f for f in DOWNLOADS_PATH.glob("*")
     	if f.is_file()
     	and not any(excluded in f.parents for excluded in excluded_paths)
 	]
