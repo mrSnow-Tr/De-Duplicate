@@ -41,6 +41,8 @@ Works on:
 ## 1. Clone Repository
 ```bash
 git clone https://github.com/torekultushar/De-Duplicate.git
+```
+```bash
 cd De-Duplicate
 ```
 
