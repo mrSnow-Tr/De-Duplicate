@@ -40,7 +40,7 @@ Works on:
 
 ## 1. Clone Repository
 ```bash
-git clone https://github.com/torekultushar/De-Duplicate.git
+git clone https://github.com/mrSnow-Tr/De-Duplicate.git
 ```
 ```bash
 cd De-Duplicate
