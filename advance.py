@@ -9,11 +9,17 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 # =========================
 # OPTIONAL tqdm
 # =========================
+
 try:
     from tqdm import tqdm
-    USE_TQDM = True
 except ImportError:
-    USE_TQDM = False
+    tqdm = None
+
+
+def progress(iterable, desc, total=None):
+    if tqdm:
+        return tqdm(iterable, desc=desc, total=total)
+    return iterable
 
 
 # =========================
@@ -26,13 +32,13 @@ FILE_CATEGORIES = {
     "Images": {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"},
     "Videos": {".mp4", ".avi", ".mov", ".webm"},
     "Documents": {".pdf", ".doc", ".docx", ".txt"},
-    "Recording": { ".wav", ".aac", ".flac"},
-    "Movies": { ".mkv", ".3gp", ".m4v"},
-    "Music": { ".mp3", ".m4a" },
-    "Programs": { ".exe", ".msi", ".apk", ".deb",".rpm", ".pkg" }, 
-    "Compressed": { ".zip ", ".rar", ".7z", ".tar", ".gz", ".tgz" },
-    "Torrents": { ".torrent"},
-    "Subtitles": { ".srt", ".ass", ".ssa", ".sub", ".vtt"}
+    "Recording": {".wav", ".aac", ".flac"},
+    "Movies": {".mkv", ".3gp", ".m4v"},
+    "Music": {".mp3", ".m4a"},
+    "Programs": {".exe", ".msi", ".apk", ".deb", ".rpm", ".pkg"},
+    "Compressed": {".zip", ".rar", ".7z", ".tar", ".gz", ".tgz"},
+    "Torrents": {".torrent"},
+    "Subtitles": {".srt", ".ass", ".ssa", ".sub", ".vtt"}
 }
 
 WHITELIST_FOLDERS = {
@@ -41,22 +47,16 @@ WHITELIST_FOLDERS = {
     "Telegram",
     "WhatsApp",
     "Bluetooth",
-    "ADM" 
+    "ADM"
 }
 
-EXCLUDE_FOLDERS = {
-    "Images",
-    "Videos",
-    "Documents",
-    "Audio",
-    "Duplicates"
-}
+EXCLUDE_FOLDERS = set(FILE_CATEGORIES.keys()) | {"Duplicates"}
 
-DB_NAME = "de_duplicate.db"
+DB_NAME = "advance.db"
 
 
 # =========================
-# DATABASE (UNDO SYSTEM)
+# DATABASE
 # =========================
 
 def init_db():
@@ -76,44 +76,16 @@ def init_db():
 
 
 def reset_db(conn):
-    c = conn.cursor()
-    c.execute("DELETE FROM moves")
+    conn.execute("DELETE FROM moves")
     conn.commit()
 
 
 def log_move(conn, src, dst):
-    c = conn.cursor()
-    c.execute("INSERT INTO moves (src, dst) VALUES (?, ?)", (str(src), str(dst)))
-    conn.commit()
-
-
-def undo_last_session():
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-
-    rows = c.execute("SELECT src, dst FROM moves").fetchall()
-
-    print(f"[UNDO] Restoring {len(rows)} files...")
-
-    for src, dst in rows:
-        try:
-            src_p = Path(src)
-            dst_p = Path(dst)
-
-            if dst_p.exists():
-                dst_p.parent.mkdir(parents=True, exist_ok=True)
-                shutil.move(str(dst_p), str(src_p))
-
-        except Exception as e:
-            print(f"[UNDO ERROR] {dst} -> {e}")
-
-    reset_db(conn)
-    conn.close()
-    print("[UNDO COMPLETE]")
+    conn.execute("INSERT INTO moves (src, dst) VALUES (?, ?)", (str(src), str(dst)))
 
 
 # =========================
-# ENV DETECTION
+# ENV
 # =========================
 
 def is_android():
@@ -121,7 +93,7 @@ def is_android():
 
 
 # =========================
-# SCAN ROOTS
+# ROOTS
 # =========================
 
 def get_scan_roots():
@@ -133,18 +105,14 @@ def get_scan_roots():
     system = platform.system()
 
     if system == "Windows":
-        for letter in "DEFGHIJKLMNOPQRSTUVWXYZ":
-            drive = Path(f"{letter}:\\")
-            if drive.exists():
-                roots.append(drive)
+        for letter in "CDEFGHIJKLMNOPQRSTUVWXYZ":
+            d = Path(f"{letter}:\\")
+            if d.exists():
+                roots.append(d)
 
-        roots.append(Path.home() / "Downloads")
+    roots.append(Path.home() / "Downloads")
 
-    elif system == "Darwin":
-        roots.append(Path.home() / "Downloads")
-
-    else:
-        roots.append(Path.home() / "Downloads")
+    if system != "Windows":
         roots.extend(Path("/mnt").glob("*"))
 
     return roots
@@ -155,9 +123,7 @@ def get_scan_roots():
 # =========================
 
 def get_destination_root():
-    if is_android():
-        return Path("/storage/emulated/0")
-    return Path.home()
+    return Path("/storage/emulated/0") if is_android() else Path.home()
 
 
 def build_folders():
@@ -166,10 +132,12 @@ def build_folders():
     folders = {}
     for c in FILE_CATEGORIES:
         p = root / c
-        p.mkdir(exist_ok=True)
+        p.mkdir(parents=True, exist_ok=True)
         folders[c] = p
 
     dup = root / "Duplicates"
+    dup.mkdir(parents=True, exist_ok=True)
+
     for c in FILE_CATEGORIES:
         (dup / c).mkdir(parents=True, exist_ok=True)
 
@@ -177,7 +145,7 @@ def build_folders():
 
 
 # =========================
-# FILE FILTERS
+# FILTERS
 # =========================
 
 def is_hidden(path):
@@ -185,7 +153,7 @@ def is_hidden(path):
 
 
 def is_system_folder(path):
-    return any(x in str(path).lower() for x in ["android/data", "android/obb"])
+    return "android/data" in str(path).lower() or "android/obb" in str(path).lower()
 
 
 def category_of(path):
@@ -201,7 +169,7 @@ def is_in_output_folder(path):
 
 
 # =========================
-# HASHING
+# HASH
 # =========================
 
 def quick_hash(path):
@@ -209,12 +177,10 @@ def quick_hash(path):
         sha = hashlib.sha256()
         with open(path, "rb") as f:
             sha.update(f.read(65536))
-
             size = path.stat().st_size
             if size > 65536:
                 f.seek(max(0, size - 65536))
                 sha.update(f.read(65536))
-
         return sha.hexdigest()
     except:
         return None
@@ -232,36 +198,30 @@ def full_hash(path):
 
 
 # =========================
-# SCORING ORIGINAL
+# SCORE
 # =========================
 
 def file_score(path):
-    score = 0
     try:
-        stat = path.stat()
-
-        score += stat.st_size
-        score += stat.st_mtime
+        s = path.stat()
+        score = s.st_size + s.st_mtime
 
         low = str(path).lower()
-
         if "downloads" in low:
             score -= 10**12
         if "telegram" in low or "whatsapp" in low:
             score -= 10**11
 
+        return score
     except:
-        pass
-
-    return score
+        return 0
 
 
 # =========================
-# MOVE SAFE
+# SAFE MOVE
 # =========================
 
 def safe_move(conn, src, dst_folder):
-
     if src.parent == dst_folder:
         return
 
@@ -272,12 +232,15 @@ def safe_move(conn, src, dst_folder):
         dst = dst_folder / f"{src.stem}_{i}{src.suffix}"
         i += 1
 
-    shutil.move(str(src), str(dst))
-    log_move(conn, src, dst)
+    try:
+        shutil.move(str(src), str(dst))
+        log_move(conn, src, dst)
+    except Exception as e:
+        print(f"[MOVE ERROR] {src}: {e}")
 
 
 # =========================
-# FILE SCAN
+# SCAN
 # =========================
 
 def scan_files():
@@ -285,27 +248,24 @@ def scan_files():
         if not root.exists():
             continue
 
-        for base, dirs, files in os.walk(root):
+        for base, _, files in os.walk(root):
+            bp = Path(base)
 
             if is_android() and "android/data" in base.lower():
                 continue
 
-            base_path = Path(base)
-
-            # WHITELIST (only scan these sources)
-            if not any(folder in base_path.parts for folder in WHITELIST_FOLDERS):
+            if not any(f in bp.parts for f in WHITELIST_FOLDERS):
                 continue
 
-            # skip output folders
-            if is_in_output_folder(base_path):
+            if is_in_output_folder(bp):
                 continue
 
             for f in files:
-                yield base_path / f
+                yield bp / f
 
 
 # =========================
-# MAIN SCAN
+# FULL SCAN
 # =========================
 
 def run_full_scan():
@@ -313,75 +273,75 @@ def run_full_scan():
     conn = init_db()
     reset_db(conn)
 
-    print("\n[FULL SCAN STARTED]\n")
+    print("\n==============================")
+    print("   Advance DUPLICATE ENGINE")
+    print("==============================\n")
 
     folders, duplicates_root = build_folders()
 
-    all_files = []
+    files = []
 
     for f in scan_files():
         try:
             if is_hidden(f) or is_system_folder(f):
                 continue
-
             if f.stat().st_size < MIN_FILE_SIZE:
                 continue
-
             if not category_of(f):
                 continue
-
-            all_files.append(f)
-
+            files.append(f)
         except:
             continue
 
+    print(f"[INFO] Files: {len(files)}")
+
     max_workers = min(32, (os.cpu_count() or 4) * 2)
 
-    print(f"[INFO] Processing {len(all_files)} files...\n")
+    hash_map = {}
 
-    hash_groups = {}
-
-    def process_file(f):
+    def process(f):
         qh = quick_hash(f)
         if not qh:
             return None
-        fh = full_hash(f)
-        return (fh, f)
+        return full_hash(f), f
 
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = [executor.submit(process_file, f) for f in all_files]
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        futures = [ex.submit(process, f) for f in files]
 
-        iterator = tqdm(as_completed(futures), total=len(futures)) if USE_TQDM else as_completed(futures)
-
-        for fut in iterator:
-            result = fut.result()
-            if not result:
+        for fut in progress(as_completed(futures), "Hashing", len(futures)):
+            res = fut.result()
+            if not res:
                 continue
+            h, f = res
+            hash_map.setdefault(h, []).append(f)
 
-            h, f = result
-            hash_groups.setdefault(h, []).append(f)
+    # =========================
+    # MOVE PHASE (FIXED)
+    # =========================
 
     moved = 0
     duplicates = 0
 
-    for h, files in hash_groups.items():
+    items = list(hash_map.items())
 
-        if len(files) == 1:
-            f = files[0]
+    for h, group in progress(items, "Moving", len(items)):
+
+        if len(group) == 1:
+            f = group[0]
             cat = category_of(f)
             if cat:
                 safe_move(conn, f, folders[cat])
                 moved += 1
             continue
 
-        original = max(files, key=file_score)
+        original = max(group, key=file_score)
         cat = category_of(original)
 
         if cat:
             safe_move(conn, original, folders[cat])
             moved += 1
 
-        for f in files:
+        for f in group:
             if f == original:
                 continue
             cat = category_of(f)
@@ -389,42 +349,65 @@ def run_full_scan():
                 safe_move(conn, f, duplicates_root / cat)
                 duplicates += 1
 
+    conn.commit()
+    conn.close()
+
     print("\n====================")
     print("SUMMARY")
     print("====================")
     print(f"Moved: {moved}")
     print(f"Duplicates: {duplicates}")
 
-    conn.close()
-    
+
 # =========================
-# ADVANCE MENU
+# UNDO
+# =========================
+
+def undo_last_session():
+    conn = sqlite3.connect(DB_NAME)
+    rows = conn.execute("SELECT src, dst FROM moves").fetchall()
+
+    print(f"[UNDO] {len(rows)} files")
+
+    for src, dst in progress(rows, "Undoing", len(rows)):
+        try:
+            s = Path(src)
+            d = Path(dst)
+            d.parent.mkdir(parents=True, exist_ok=True)
+
+            if d.exists():
+                shutil.move(str(d), str(s))
+        except Exception as e:
+            print(f"[UNDO ERROR] {dst}: {e}")
+
+    conn.execute("DELETE FROM moves")
+    conn.commit()
+    conn.close()
+
+    print("[UNDO COMPLETE]")
+
+
+# =========================
+# MENU
 # =========================
 
 def advance_menu():
     while True:
-        print("\n1. Full scan     -> Scan everything and filter duplicates")
+        print("\n1. Full scan     -> Full Scan to organize and filter")
         print("2. Undo previous -> Undo everything from previous scan")
-        print("3. Exit or e     -> Return to main menu")
+        print("3. Exit or e     -> Exit or Quite the Duplicate finder")
 
-        choice = input("\nEnter your selection: ").strip().lower()
+        c = input("> ").strip().lower()
 
-        if choice in ("full", "1"):
+        if c in ("1", "full", "f" ):
             run_full_scan()
-
-        elif choice in ("undo", "2"):
+        elif c in ("2", "undo", "u"):
             undo_last_session()
-
-        elif choice in ("exit", "e", "3"):
+        elif c in ("3", "exit", "e"):
             break
-
         else:
-            print("Invalid option")
+            print("Invalid")
 
-
-# =========================
-# MAIN ENTRY FOR main.py
-# =========================
 
 def run_advance_mode():
     advance_menu()
