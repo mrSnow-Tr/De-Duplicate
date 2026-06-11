@@ -1,313 +1,58 @@
-import os
-import hashlib
-import shutil
-import threading
-from pathlib import Path
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from custom import run_custom_mode
+from moderate import run_moderate_mode
+from advance import run_advance_mode
+from basic import run_basic_mode
 
-# =========================
-# OPTIONAL PROGRESS BAR
-# =========================
 
-try:
-    from tqdm import tqdm
-except ImportError:
-    tqdm = None
-
-
-# =========================
-# CROSS-PLATFORM DOWNLOADS PATH
-# =========================
-
-def get_downloads_path():
-    home = Path.home()
-
-    # Android / Termux detection
-    if "ANDROID_ROOT" in os.environ or "ANDROID_DATA" in os.environ:
-        android_path = Path("/storage/emulated/0/Download")
-        if android_path.exists():
-            return android_path
-
-        return home / "storage" / "downloads"
-
-    # Windows / Linux / macOS
-    return home / "Downloads"
-
-
-DOWNLOADS_PATH = get_downloads_path()
-
-
-# =========================
-# FILE CATEGORY CONFIG
-# =========================
-
-FILE_CATEGORIES = {
-    "Images": {
-        ".jpg", ".jpeg", ".png", ".gif",
-        ".bmp", ".webp", ".tiff", ".heic",
-        ".dng", ".raw", ".svg", ".ico"
-    },
-
-    "Videos": {
-        ".mp4", ".mkv", ".avi", ".mov",
-        ".wmv", ".flv", ".webm", ".m4v",
-        ".3gp", ".mpeg", ".mpg"
-    },
-
-    "Music": {
-        ".mp3", ".wav", ".flac", ".aac",
-        ".ogg", ".m4a", ".wma", ".opus"
-    },
-
-    "Documents": {
-        ".pdf", ".doc", ".docx", ".ppt",
-        ".pptx", ".xls", ".xlsx", ".txt",
-        ".rtf", ".csv", ".epub", ".md"
-    },
-
-    "Programs": {
-        ".exe", ".msi", ".apk", ".deb",
-        ".rpm", ".sh", ".bat", ".jar",
-        ".appimage", ".iso"
-    },
-
-    "Compressed": {
-        ".zip", ".rar", ".7z", ".tar",
-        ".gz", ".bz2", ".xz"
-    },
-
-    "Code": {
-        ".py", ".js", ".ts", ".java",
-        ".cpp", ".c", ".cs", ".html",
-        ".css", ".php", ".json", ".xml",
-        ".yaml", ".yml", ".sql"
-    }
-}
-
-
-# =========================
-# CATEGORY FOLDERS
-# =========================
-
-CATEGORY_PATHS = {}
-
-for category in FILE_CATEGORIES:
-    path = DOWNLOADS_PATH / category
-    path.mkdir(parents=True, exist_ok=True)
-    CATEGORY_PATHS[category] = path
-
-DUPLICATES_PATH = DOWNLOADS_PATH / "Duplicates"
-DUPLICATES_PATH.mkdir(parents=True, exist_ok=True)
-
-
-SUPPORTED_EXTENSIONS = {
-    ext
-    for extensions in FILE_CATEGORIES.values()
-    for ext in extensions
-}
-
-
-# =========================
-# SAFE EXIT HANDLING
-# =========================
-
-exit_event = threading.Event()
-hash_lock = threading.Lock()
-
-
-def safe_exit_handler(signum=None, frame=None):
-    print("\n[INFO] Safe exit triggered. Finishing current operations...")
-    exit_event.set()
-
-
-import signal
-signal.signal(signal.SIGINT, safe_exit_handler)
-
-
-# =========================
-# HASH GENERATION (OPTIMIZED)
-# =========================
-
-def generate_file_hash(file_path, chunk_size=1024 * 1024):
-    sha256 = hashlib.sha256()
-
-    try:
-        with open(file_path, "rb") as f:
-            while chunk := f.read(chunk_size):
-                sha256.update(chunk)
-        return sha256.hexdigest()
-
-    except Exception as e:
-        print(f"[ERROR] Hash failed: {file_path} -> {e}")
-        return None
-
-
-# =========================
-# FILE CATEGORY DETECTION
-# =========================
-
-def get_file_category(file_path):
-    ext = file_path.suffix.lower()
-
-    if ext not in SUPPORTED_EXTENSIONS:
-        return None
-
-    for category, extensions in FILE_CATEGORIES.items():
-        if ext in extensions:
-            return category
-
-    return None
-
-
-# =========================
-# SAFE MOVE (NO OVERWRITE)
-# =========================
-
-def safe_move(src, dest_folder):
-    dest = dest_folder / src.name
-    counter = 1
-
-    while dest.exists():
-        dest = dest_folder / f"{src.stem}_{counter}{src.suffix}"
-        counter += 1
-
-    shutil.move(str(src), str(dest))
-
-
-# =========================
-# DUPLICATE HANDLER (SAFE)
-# =========================
-
-def handle_duplicate(file_path):
-    try:
-        safe_move(file_path, DUPLICATES_PATH)
-        print(f"[DUPLICATE → MOVED] {file_path.name}")
-    except Exception as e:
-        print(f"[ERROR] Duplicate move failed: {file_path} -> {e}")
-
-
-# =========================
-# FILE PROCESSING TASK
-# =========================
-
-def process_file(file_path, seen_hashes):
-    if exit_event.is_set():
-        return "exit"
-
-    if file_path.name.startswith("."):
-        return "skipped"
-
-    category = get_file_category(file_path)
-    if not category:
-        return "skipped"
-
-    file_hash = generate_file_hash(file_path)
-    if not file_hash:
-        return "skipped"
-	
-    with hash_lock:
-    	if file_hash in seen_hashes:
-        	handle_duplicate(file_path)
-        	return "duplicate"
-
-    	seen_hashes.add(file_hash)
-    
-
-    try:
-        safe_move(file_path, CATEGORY_PATHS[category])
-
-        print(f"[MOVED] {file_path.name}")
-        return "moved"
-
-    except Exception as e:
-        print(f"[ERROR] Move failed: {file_path} -> {e}")
-        return "error"
-
-
-# =========================
-# MAIN ENGINE
-# =========================
-
-def process_files():
+def show_menu():
     print("\n==============================")
-    print("   PRODUCTION DEDUP SCRIPT")
+    print("        DE-DUPLICATE")
     print("==============================\n")
+    print("Advance  (a) -> Full scan device and smartly organizes files")
+    print("Moderate (m) -> Organizes all types of files in 'Downloads'")
+    print("Basic    (b) -> Full scan for duplicates & corrupted files ")
+    print("Custom   (c) -> Scan selected folders to duplicates & organize") 
+    print("Exit     (e) -> To exit/quit type 'e', 'exit' or 'quit'")
+    print()
 
-    if not DOWNLOADS_PATH.exists():
-        print(f"[ERROR] Downloads folder not found: {DOWNLOADS_PATH}")
-        return
 
-    excluded_paths = set(CATEGORY_PATHS.values())
-    excluded_paths.add(DUPLICATES_PATH)
-    all_files = [
-    	f for f in DOWNLOADS_PATH.glob("*")
-    	if f.is_file()
-    	and not any(excluded in f.parents for excluded in excluded_paths)
-	]
+def main():
+    while True:
+        try:
+            show_menu()
 
-    if not all_files:
-        print("[INFO] No files found.")
-        return
-
-    seen_hashes = set()
-
-    stats = {
-        "moved": 0,
-        "duplicate": 0,
-        "skipped": 0,
-        "error": 0
-    }
-
-    max_workers = min(32, (os.cpu_count() or 4) * 2)
-
-    print(f"[INFO] Processing {len(all_files)} files using {max_workers} threads...\n")
-
-    executor = ThreadPoolExecutor(max_workers=max_workers)
-    futures = []
-
-    for file in all_files:
-        futures.append(executor.submit(process_file, file, seen_hashes))
-
-    iterator = as_completed(futures)
-
-    if tqdm:
-        iterator = tqdm(iterator, total=len(futures), desc="Processing")
-
-    try:
-        for future in iterator:
-            if exit_event.is_set():
+            choice = input("What is your choice? => ").strip().lower()
+            
+            if choice in ("m", "moderate"):
+                run_moderate_mode()
                 break
+            elif choice in ("b", "basic"):
+            	run_basic_mode()
+            	break
+            
+            elif choice in ("c", "custom"):
+            	run_custom_mode()
+            	break
+            
+            elif choice in ("a", "advance"):
+                run_advance_mode()
+                break 
 
-            result = future.result()
+            elif choice in ("e", "exit", "quit"):
+                print("\n[INFO] Exiting program.")
+                break   
+			
+            else:
+                print("\n[ERROR] Invalid option. Please enter 'Quick' or 'Full'.\n")
 
-            if result in stats:
-                stats[result] += 1
+        except KeyboardInterrupt:
+            print("\n\n[INFO] Interrupted by user. Exiting safely.")
+            break
 
-    except KeyboardInterrupt:
-        safe_exit_handler()
+        except Exception as e:
+            print(f"\n[ERROR] Unexpected error: {e}")
+            print("Restarting...\n")
 
-    finally:
-        executor.shutdown(wait=True)
-
-    # =========================
-    # SUMMARY
-    # =========================
-
-    print("\n==============================")
-    print("          SUMMARY")
-    print("==============================")
-
-    print(f"Moved files     : {stats['moved']}")
-    print(f"Duplicates      : {stats['duplicate']}")
-    print(f"Skipped         : {stats['skipped']}")
-    print(f"Errors          : {stats['error']}")
-
-    print("\n[DONE] Process completed safely.")
-
-
-# =========================
-# ENTRY POINT
-# =========================
 
 if __name__ == "__main__":
-    process_files()
+    main()
